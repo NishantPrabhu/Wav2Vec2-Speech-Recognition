@@ -1,8 +1,14 @@
 
-import torch 
+import os
+import torch
+import wandb
+import common
 import datasets
+import data_utils 
+import numpy as np
 import transformers
 import torch.nn as nn 
+import torch.optim as optim
 import torch.nn.functional as F 
 
 
@@ -10,7 +16,7 @@ class SpeechRecognitionModel(nn.Module):
 
     def __init__(self, processor):
         super().__init__()
-        self.model = transformers.Wav2Vec2ForCTC(
+        self.model = transformers.Wav2Vec2ForCTC.from_pretrained(
             "facebook/wav2vec2-base-960h",
             gradient_checkpointing = True,
             ctc_loss_reduction = "mean",
@@ -33,7 +39,7 @@ class Trainer:
         
         self.model = SpeechRecognitionModel(processor=self.train_loader.processor).to(self.device)
         self.optim = optim.Adam(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.0001)
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=self.config["epochs"], eta_min=0.0, last_epoch=-1)
+        self.scheduler = optim.lr_scheduler.StepLR(self.optim, step_size=1, gamma=0.5, last_epoch=-1)
 
         self.done_epochs = 1
         self.metric_best = np.inf 
@@ -54,7 +60,7 @@ class Trainer:
             
             predictions = F.softmax(logits, dim=-1).argmax(dim=-1).detach().cpu().numpy()
             targets = targets.detach().cpu().numpy()
-            targets[targets == -100] = self.train_loader.processor.pad_token_id
+            targets[targets == -100] = self.train_loader.processor.tokenizer.pad_token_id
             pred_str = self.train_loader.processor.batch_decode(predictions)
             target_str = self.train_loader.processor.batch_decode(targets, group_tokens=False)
             wer_values.append(metric.compute(predictions=pred_str, references=target_str))
@@ -91,7 +97,7 @@ class Trainer:
             common.progress_bar(status=test_meter.return_msg(), progress=(idx+1)/len(self.test_loader))
 
         common.progress_bar(status=test_meter.return_msg(), progress=1.0)
-        self.logger.record(f"Epoch {epoch}/{self.config['epochs']} Computing WER", mode='test')
+        self.logger.record("Computing WER", mode='test')
         test_wer = self.compute_word_error_rate(self.val_loader)
         self.logger.record(test_meter.return_msg() + " [WER] {:.4f}".format(test_wer), mode="test")
 
@@ -134,7 +140,8 @@ class Trainer:
             train_wer = self.compute_word_error_rate(self.train_loader)
             wandb.log({"Train WER": train_wer, "Epoch": epoch})
             self.logger.write(train_meter.return_msg() + f" [WER] {round(train_wer, 4)}", mode="train")
-            self.scheduler.step()
+            if self.config["model"]["lr_scheduling"]:
+                self.scheduler.step()
 
             if epoch % self.config["eval_every"] == 0:
                 self.logger.record(f"Epoch {epoch}/{self.config['epochs']}", mode='val')

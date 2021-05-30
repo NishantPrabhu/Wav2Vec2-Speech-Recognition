@@ -11,7 +11,7 @@ import transformers
 def remove_punctuation_and_lower(texts):
     punctuation = re.sub(r"\'", r"", string.punctuation)
     for i in range(len(texts)):
-        texts[i] = texts[i].translate(str.maketrans("", "", punctuation))
+        texts[i] = texts[i].translate(str.maketrans("", "", punctuation)).lower()
     return texts
 
 def create_vocabulary_file(texts):
@@ -37,7 +37,7 @@ def process_timit_dataset(read_limit=2500):
 class TimitDataloader:
 
     def __init__(self, data, batch_size):
-        self.files, self.text = train_data["file"], train_data["text"]
+        self.files, self.text = data["file"], data["text"]
         self.batch_size = batch_size
         self.ptr = 0
 
