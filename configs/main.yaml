@@ -1,0 +1,11 @@
+
+epochs: 20
+eval_every: 2
+
+data:
+  batch_size: 16
+  read_limit: 5000
+
+model:
+  optim_lr: 0.0001
+  lr_scheduling: True
