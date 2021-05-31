@@ -1,7 +1,7 @@
 
-epochs: 30
-warmup_epochs: 5
-eval_every: 3
+epochs: 10
+warmup_epochs: 2
+eval_every: 1
 
 data:
   batch_size: 8
