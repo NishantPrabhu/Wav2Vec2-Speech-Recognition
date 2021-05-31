@@ -24,8 +24,8 @@ class SpeechRecognitionModel(nn.Module):
         )
         self.model.freeze_feature_extractor()
 
-    def forward(self, inputs, targets): 
-        output = self.model(inputs, labels=targets)
+    def forward(self, inputs, input_attention, targets): 
+        output = self.model(input_values=inputs, attention_mask=input_attention, labels=targets)
         return output.loss, output.logits
 
 
@@ -54,30 +54,31 @@ class Trainer:
             self.load_model(args["load"])
 
     def compute_word_error_rate(self, loader):
-        wer_values = []
+        wer_values, preds, trgs = [], [], []
         metric = datasets.load_metric("wer")
         for idx in range(len(loader)):
-            inputs, targets = loader.flow()
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            inputs, input_mask, targets = loader.flow()
+            inputs, input_mask, targets = inputs.to(self.device), input_mask.to(self.device), targets.to(self.device)
             with torch.no_grad():
-                loss, logits = self.model(inputs, targets)
-            
+                loss, logits = self.model(inputs, input_mask, targets)
+
             predictions = F.softmax(logits, dim=-1).argmax(dim=-1).detach().cpu().numpy()
             targets = targets.detach().cpu().numpy()
             targets[targets == -100] = self.train_loader.processor.tokenizer.pad_token_id
             pred_str = self.train_loader.processor.batch_decode(predictions)
             target_str = self.train_loader.processor.batch_decode(targets, group_tokens=False)
             wer_values.append(metric.compute(predictions=pred_str, references=target_str))
+            preds.extend(pred_str), trgs.extend(target_str)
             common.progress_bar(status="", progress=(idx+1)/len(loader))
             
         common.progress_bar(status="[WER] {:.4f}".format(np.mean(wer_values)), progress=1.0)
-        return np.mean(wer_values)
+        return np.mean(wer_values), preds, trgs
 
     def train_on_batch(self, batch):
         self.model.train()
-        inputs, targets = batch 
-        inputs, targets = inputs.to(self.device), targets.to(self.device)
-        loss, logits = self.model(inputs, targets)
+        inputs, input_mask, targets = batch 
+        inputs, input_mask, targets = inputs.to(self.device), input_mask.to(self.device), targets.to(self.device)
+        loss, logits = self.model(inputs, input_mask, targets)
         self.optim.zero_grad()
         loss.backward()
         self.optim.step() 
@@ -85,10 +86,10 @@ class Trainer:
 
     def infer_on_batch(self, batch):
         self.model.eval()
-        inputs, targets = batch 
-        inputs, targets = inputs.to(self.device), targets.to(self.device)
+        inputs, input_mask, targets = batch 
+        inputs, input_mask, targets = inputs.to(self.device), input_mask.to(self.device), targets.to(self.device)
         with torch.no_grad():
-            loss, logits = self.model(inputs, targets)
+            loss, logits = self.model(inputs, input_mask, targets)
         return {"CTC loss": loss.item()}
 
     def save_model(self, epoch, metric):
@@ -110,7 +111,7 @@ class Trainer:
             self.optim.load_state_dict(state["optim"])
             self.scheduler.load_state_dict(state["scheduler"])
             self.done_epochs = state["epoch"]
-            self.logger.show(f"Successfully loaded model from {path}")
+            self.logger.show(f"Successfully loaded model from {path}", mode='info')
 
     def adjust_learning_rate(self, epoch):
         if epoch < self.warmup_epochs:
@@ -120,18 +121,23 @@ class Trainer:
             self.scheduler.step()
 
     def get_test_performance(self):
-        self.load_model(self.output_dir)
         test_meter = common.AverageMeter()
         for idx in range(len(self.val_loader)):
             batch = self.val_loader.flow()
             test_metrics = self.infer_on_batch(batch)
             test_meter.add(test_metrics)
-            common.progress_bar(status=test_meter.return_msg(), progress=(idx+1)/len(self.test_loader))
+            common.progress_bar(status=test_meter.return_msg(), progress=(idx+1)/len(self.val_loader))
 
         common.progress_bar(status=test_meter.return_msg(), progress=1.0)
         self.logger.record("Computing WER", mode='test')
-        test_wer = self.compute_word_error_rate(self.val_loader)
+        test_wer, preds, trgs = self.compute_word_error_rate(self.val_loader)
         self.logger.record(test_meter.return_msg() + " [WER] {:.4f}".format(test_wer), mode="test")
+        print("\n\nSample predictions")
+        print("============================================================")
+        for i in np.random.choice(np.arange(len(preds)), size=10, replace=False):
+            print("Target     : {}".format(trgs[i]))
+            print("Prediction : {}".format(preds[i]))
+            print("--------------------------------------------------------")
 
     def train(self):
         print() 
@@ -148,7 +154,7 @@ class Trainer:
 
             common.progress_bar(status=train_meter.return_msg(), progress=1.0)
             self.logger.record(f"Epoch {epoch}/{self.config['epochs']} Computing WER", mode='train')
-            train_wer = self.compute_word_error_rate(self.train_loader)
+            train_wer, _, _ = self.compute_word_error_rate(self.train_loader)
             wandb.log({"Train WER": train_wer, "Epoch": epoch})
             self.logger.write(train_meter.return_msg() + f" [WER] {round(train_wer, 4)}", mode="train")
             self.adjust_learning_rate(epoch)        
@@ -165,7 +171,7 @@ class Trainer:
 
                 common.progress_bar(status=val_meter.return_msg(), progress=1.0)
                 self.logger.record(f"Epoch {epoch}/{self.config['epochs']} Computing WER", mode='val')
-                val_wer = self.compute_word_error_rate(self.val_loader)
+                val_wer, _, _ = self.compute_word_error_rate(self.val_loader)
                 wandb.log({"Val CTC loss": val_meter.return_metrics()["CTC loss"], "Val WER": val_wer, "Epoch": epoch})
                 self.logger.write(val_meter.return_msg() + f" [WER] {round(val_wer, 4)}", mode='val')
 

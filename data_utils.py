@@ -11,7 +11,7 @@ import transformers
 def remove_punctuation_and_lower(texts):
     punctuation = re.sub(r"\'", r"", string.punctuation)
     for i in range(len(texts)):
-        texts[i] = texts[i].translate(str.maketrans("", "", punctuation)).lower()
+        texts[i] = texts[i].translate(str.maketrans("", "", punctuation)).upper()
     return texts
 
 def create_vocabulary_file(texts):
@@ -55,12 +55,13 @@ class TimitDataloader:
             if self.ptr >= len(self.files):
                 self.ptr = 0
 
-        inputs = self.processor(speech, sampling_rate=16000, padding=True, return_tensors="pt")["input_values"]
+        inputs = self.processor(speech, sampling_rate=16000, padding=True, return_attention_mask=True, return_tensors="pt")
+        input_data, input_attention = inputs["input_values"], inputs["attention_mask"]
         with self.processor.as_target_processor():
             labels = self.processor(text, padding=True, return_tensors="pt")
             targets, attention_mask = labels["input_ids"], labels["attention_mask"]
             targets = targets.masked_fill(attention_mask.ne(1), -100)
-        return inputs, targets
+        return input_data, input_attention, targets
 
 
 def get_dataloaders(batch_size, read_limit=2500):
@@ -76,6 +77,7 @@ if __name__ == "__main__":
     train_data, test_data = process_timit_dataset()
     train_loader = TimitDataloader(train_data, batch_size=4)
 
-    inputs, targets = train_loader.flow()
+    inputs, input_attention, targets = train_loader.flow()
     print(inputs)
+    print(input_attention)
     print(targets)
