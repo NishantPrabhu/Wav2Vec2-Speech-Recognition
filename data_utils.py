@@ -37,15 +37,10 @@ def process_timit_dataset(read_limit=2500):
 class TimitDataloader:
 
     def __init__(self, data, batch_size):
+        self.processor = transformers.Wav2Vec2Processor.from_pretrained("facebook/wav2vec2-base-960h")
         self.files, self.text = data["file"], data["text"]
         self.batch_size = batch_size
         self.ptr = 0
-
-        tokenizer = transformers.Wav2Vec2CTCTokenizer(
-            "./timit_vocab.json", unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|")
-        feature_ext = transformers.Wav2Vec2FeatureExtractor(
-            feature_size=1, sampling_rate=16000, padding_value=0.0, do_normalize=True, return_attention_mask=False)
-        self.processor = transformers.Wav2Vec2Processor(tokenizer=tokenizer, feature_extractor=feature_ext)
 
     def __len__(self):
         return len(self.files) // self.batch_size 

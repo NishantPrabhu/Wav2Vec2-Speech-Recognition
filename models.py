@@ -38,8 +38,12 @@ class Trainer:
             batch_size = self.config["data"]["batch_size"], read_limit = self.config["data"]["read_limit"])
         
         self.model = SpeechRecognitionModel(processor=self.train_loader.processor).to(self.device)
-        self.optim = optim.Adam(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.0001)
-        self.scheduler = optim.lr_scheduler.StepLR(self.optim, step_size=1, gamma=0.5, last_epoch=-1)
+        self.optim = optim.SGD(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.005, momentum=0.9)
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=self.config["epochs"]-self.config["warmup_epochs"], eta_min=0.0, last_epoch=-1)
+        self.warmup_epochs = self.config.get("warmup_epochs", 0)
+
+        if self.warmup_epochs > 0:
+            self.warmup_rate = (self.config["model"]["optim_lr"] - 1e-12) / self.warmup_epochs 
 
         self.done_epochs = 1
         self.metric_best = np.inf 
@@ -87,20 +91,6 @@ class Trainer:
             loss, logits = self.model(inputs, targets)
         return {"CTC loss": loss.item()}
 
-    def get_test_performance(self):
-        self.load_model(self.output_dir)
-        test_meter = common.AverageMeter()
-        for idx in range(len(self.val_loader)):
-            batch = self.val_loader.flow()
-            test_metrics = self.infer_on_batch(batch)
-            test_meter.add(test_metrics)
-            common.progress_bar(status=test_meter.return_msg(), progress=(idx+1)/len(self.test_loader))
-
-        common.progress_bar(status=test_meter.return_msg(), progress=1.0)
-        self.logger.record("Computing WER", mode='test')
-        test_wer = self.compute_word_error_rate(self.val_loader)
-        self.logger.record(test_meter.return_msg() + " [WER] {:.4f}".format(test_wer), mode="test")
-
     def save_model(self, epoch, metric):
         state = {
             "model": self.model.state_dict(),
@@ -122,6 +112,27 @@ class Trainer:
             self.done_epochs = state["epoch"]
             self.logger.show(f"Successfully loaded model from {path}")
 
+    def adjust_learning_rate(self, epoch):
+        if epoch < self.warmup_epochs:
+            for group in self.optim.param_groups:
+                group["lr"] = 1e-12 + epoch * self.warmup_rate
+        else:
+            self.scheduler.step()
+
+    def get_test_performance(self):
+        self.load_model(self.output_dir)
+        test_meter = common.AverageMeter()
+        for idx in range(len(self.val_loader)):
+            batch = self.val_loader.flow()
+            test_metrics = self.infer_on_batch(batch)
+            test_meter.add(test_metrics)
+            common.progress_bar(status=test_meter.return_msg(), progress=(idx+1)/len(self.test_loader))
+
+        common.progress_bar(status=test_meter.return_msg(), progress=1.0)
+        self.logger.record("Computing WER", mode='test')
+        test_wer = self.compute_word_error_rate(self.val_loader)
+        self.logger.record(test_meter.return_msg() + " [WER] {:.4f}".format(test_wer), mode="test")
+
     def train(self):
         print() 
         for epoch in range(max(1, self.done_epochs), self.config["epochs"]+1):
@@ -140,8 +151,7 @@ class Trainer:
             train_wer = self.compute_word_error_rate(self.train_loader)
             wandb.log({"Train WER": train_wer, "Epoch": epoch})
             self.logger.write(train_meter.return_msg() + f" [WER] {round(train_wer, 4)}", mode="train")
-            if self.config["model"]["lr_scheduling"]:
-                self.scheduler.step()
+            self.adjust_learning_rate(epoch)        
 
             if epoch % self.config["eval_every"] == 0:
                 self.logger.record(f"Epoch {epoch}/{self.config['epochs']}", mode='val')

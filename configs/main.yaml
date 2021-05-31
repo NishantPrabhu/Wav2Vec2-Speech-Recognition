@@ -1,11 +1,11 @@
 
-epochs: 20
-eval_every: 2
+epochs: 30
+warmup_epochs: 5
+eval_every: 3
 
 data:
-  batch_size: 16
+  batch_size: 8
   read_limit: 5000
 
 model:
   optim_lr: 0.0001
-  lr_scheduling: True
