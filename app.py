@@ -1,5 +1,6 @@
 
 import os
+import time
 import dash
 import wave
 import models
@@ -15,7 +16,7 @@ from dash.dependencies import Output, Input
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
-time = dt.now().strftime("%d-%m-%Y_%H-%M")
+curr_time = dt.now().strftime("%d-%m-%Y_%H-%M")
 
 # ======================================
 # App layout
@@ -81,7 +82,7 @@ def record_audio(n_clicks):
     stream.stop_stream()
     stream.close()
     p.terminate()
-    with wave.open(f"test_recording_{time}.wav", "wb") as wf:
+    with wave.open(f"test_recording_{curr_time}.wav", "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
         wf.setframerate(44100)
@@ -94,9 +95,11 @@ def record_audio(n_clicks):
     [Input("record-button", "n_clicks")]
 )
 def generate_prediction(n_clicks):
-    if os.path.exists(f"test_recording_{time}.wav") and (n_clicks % 2) == 0:
-        pred_str = model.predict_for_file(f"test_recording_{time}.wav")
-        os.remove(f"test_recording_{time}.wav")
+    if os.path.exists(f"test_recording_{curr_time}.wav") and (n_clicks % 2) == 0:
+        start_time = time.time()
+        pred_str = model.predict_for_file(f"test_recording_{curr_time}.wav")
+        print("Prediction time: {} sec".format(time.time() - start_time))
+        os.remove(f"test_recording_{curr_time}.wav")
         return [pred_str[0][0] + pred_str[0][1:].lower()]
     return ["Please generate a recording!"]
 
@@ -111,6 +114,7 @@ if __name__ == "__main__":
         "config": "configs/main.yaml", 
         "output": dt.now().strftime("%d-%m-%Y_%H-%M"), 
         "task": "single_test", 
+        "device": "cpu",
         "dataset": "timit", 
         "load": "outputs/timit/train/31-05-2021-11-58",
         "file": "test_recording.wav"

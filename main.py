@@ -10,7 +10,8 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser()
     ap.add_argument("-c", "--config", required=True, help="Path to configuration file")
-    ap.add_argument("-d", "--dataset", default="timit", type=str, help="Name of dataset finetuned on")
+    ap.add_argument("-d", "--device", default="cpu", type=str, help="Whether to perform task on CPU ('cpu') or GPU ('cuda')")
+    ap.add_argument("-a", "--dataset", default="timit", type=str, help="Name of dataset finetuned on")
     ap.add_argument("-t", "--task", default="train", type=str, help="Task to perform. Choose between ['train', 'test']")
     ap.add_argument("-o", "--output", default=dt.now().strftime("%d-%m-%Y-%H-%M"), type=str, help="Output directory path")
     ap.add_argument("-l", "--load", default=None, type=str, help="Path to directory containing checkpoint as best_model.pt")

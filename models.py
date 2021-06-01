@@ -33,12 +33,15 @@ class Trainer:
 
     def __init__(self, args):
         self.args = args
-        self.config, self.output_dir, self.logger, self.device = common.init_experiment(args)
+        self.config, self.output_dir, self.logger, _ = common.init_experiment(args)
+        self.device = torch.device(self.args["device"]) if args["device"] in ["cpu", "cuda"] else torch.device("cpu")
         self.train_loader, self.val_loader = data_utils.get_dataloaders(
             batch_size = self.config["data"]["batch_size"], read_limit = self.config["data"]["read_limit"])
         
         self.model = SpeechRecognitionModel(processor=self.train_loader.processor).to(self.device)
         if self.args["task"] == "train":
+            if "cpu" in self.device:
+                self.logger.show("\nTraining model on CPU! I sure hope you know what you are doing", mode='info')
             self.optim = optim.SGD(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.005, momentum=0.9)
             self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=self.config["epochs"]-self.config["warmup_epochs"], eta_min=0.0, last_epoch=-1)
             self.warmup_epochs = self.config.get("warmup_epochs", 0)
