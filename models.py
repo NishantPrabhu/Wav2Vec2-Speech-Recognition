@@ -38,20 +38,21 @@ class Trainer:
             batch_size = self.config["data"]["batch_size"], read_limit = self.config["data"]["read_limit"])
         
         self.model = SpeechRecognitionModel(processor=self.train_loader.processor).to(self.device)
-        self.optim = optim.SGD(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.005, momentum=0.9)
-        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=self.config["epochs"]-self.config["warmup_epochs"], eta_min=0.0, last_epoch=-1)
-        self.warmup_epochs = self.config.get("warmup_epochs", 0)
+        if self.args["task"] == "train":
+            self.optim = optim.SGD(self.model.parameters(), lr=self.config["model"]["optim_lr"], weight_decay=0.005, momentum=0.9)
+            self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optim, T_max=self.config["epochs"]-self.config["warmup_epochs"], eta_min=0.0, last_epoch=-1)
+            self.warmup_epochs = self.config.get("warmup_epochs", 0)
 
-        if self.warmup_epochs > 0:
-            self.warmup_rate = (self.config["model"]["optim_lr"] - 1e-12) / self.warmup_epochs 
+            if self.warmup_epochs > 0:
+                self.warmup_rate = (self.config["model"]["optim_lr"] - 1e-12) / self.warmup_epochs 
 
-        self.done_epochs = 1
-        self.metric_best = np.inf 
-        run = wandb.init(project="hyperverge-asr-prototype")
-        self.logger.write(f"Wandb run: {run.get_url()}", mode='info')
-
-        if args["load"] is not None:
-            self.load_model(args["load"])
+            self.done_epochs = 1
+            self.metric_best = np.inf 
+            run = wandb.init(project="hyperverge-asr-prototype")
+            self.logger.write(f"Wandb run: {run.get_url()}", mode='info')
+        else:
+            if args["load"] is not None:
+                self.load_model(args["load"])
 
     def compute_word_error_rate(self, loader):
         wer_values, preds, trgs = [], [], []
@@ -108,9 +109,6 @@ class Trainer:
         else:
             state = torch.load(os.path.join(self.args["load"], "best_model.pt"), map_location=self.device)
             self.model.load_state_dict(state["model"])
-            self.optim.load_state_dict(state["optim"])
-            self.scheduler.load_state_dict(state["scheduler"])
-            self.done_epochs = state["epoch"]
             self.logger.show(f"Successfully loaded model from {path}", mode='info')
 
     def adjust_learning_rate(self, epoch):
@@ -138,6 +136,16 @@ class Trainer:
             print("Target     : {}".format(trgs[i]))
             print("Prediction : {}".format(preds[i]))
             print("--------------------------------------------------------")
+
+    def predict_for_file(self, file_path):
+        inputs, input_mask = self.train_loader.generate_from_file(file_path)
+        inputs, input_mask = inputs.to(self.device), input_mask.to(self.device)
+        with torch.no_grad():
+            logits = self.model.model(inputs, attention_mask=input_mask).logits
+            predictions = F.softmax(logits, dim=-1).argmax(dim=-1).detach().cpu().numpy()
+        pred_str = self.train_loader.processor.batch_decode(predictions)
+        print("\nPrediction: {}".format(pred_str))
+        return pred_str
 
     def train(self):
         print() 

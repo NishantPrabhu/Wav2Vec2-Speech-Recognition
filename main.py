@@ -1,4 +1,5 @@
 
+import os
 import time 
 import models 
 import argparse 
@@ -13,6 +14,7 @@ if __name__ == "__main__":
     ap.add_argument("-t", "--task", default="train", type=str, help="Task to perform. Choose between ['train', 'test']")
     ap.add_argument("-o", "--output", default=dt.now().strftime("%d-%m-%Y-%H-%M"), type=str, help="Output directory path")
     ap.add_argument("-l", "--load", default=None, type=str, help="Path to directory containing checkpoint as best_model.pt")
+    ap.add_argument("-f", "--file", default="test.wav", type=str, help="Path to single testing file")
     args = vars(ap.parse_args())
 
     trainer = models.Trainer(args)
@@ -23,6 +25,11 @@ if __name__ == "__main__":
     elif args["task"] == "test":
         assert args["load"] is not None, "Please provide a checkpoint to load using --load to check test performance"
         trainer.get_test_performance()
+
+    elif args["task"] == "single_test":
+        assert os.path.exists(args["file"]), "No wav file found at path provided"
+        assert args["load"] is not None, "Please provide a checkpoint to load using --load to check test performance"
+        trainer.predict_for_file(args["file"])
 
     else:
         raise ValueError(f"Unrecognized argument passed to --task: {args['task']}")
