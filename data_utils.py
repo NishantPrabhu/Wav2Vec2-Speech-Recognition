@@ -3,9 +3,11 @@ import re
 import json
 import torch 
 import string
+import librosa
 import datasets 
 import soundfile
 import transformers
+import numpy as np
 
 
 def remove_punctuation_and_lower(texts):
@@ -62,6 +64,13 @@ class TimitDataloader:
             targets, attention_mask = labels["input_ids"], labels["attention_mask"]
             targets = targets.masked_fill(attention_mask.ne(1), -100)
         return input_data, input_attention, targets
+
+    def generate_from_file(self, file_path):
+        signal, sr = soundfile.read(file_path, dtype="float32")
+        signal = librosa.resample(np.mean(signal, axis=1), orig_sr=sr, target_sr=16000)
+        inputs = self.processor(signal, sampling_rate=16000, return_attention_mask=True, return_tensors="pt")
+        input_data, input_attention = inputs["input_values"], inputs["attention_mask"]
+        return input_data, input_attention
 
 
 def get_dataloaders(batch_size, read_limit=2500):
