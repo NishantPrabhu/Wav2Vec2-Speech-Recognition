@@ -16,7 +16,6 @@ from dash.dependencies import Output, Input
 
 external_stylesheets = [dbc.themes.BOOTSTRAP]
 app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
-curr_time = dt.now().strftime("%d-%m-%Y_%H-%M")
 
 # ======================================
 # App layout
@@ -38,6 +37,7 @@ app.layout = html.Div(children=[
                 id="record-button", 
                 n_clicks=0
             ),
+            html.Div(id="hidden-div", style={"display": "none"}),
             html.Div(id="app-status", style={"padding-top": "20px", "width": "100%", "text-align": "center"}),
             html.Div(id="record-status", style={"padding-top": "20px", "width": "100%", "text-align": "center"}),
             html.H4("Prediction", style={"padding-top": "40px", "width": "100%", "text-align": "center", "font-weight": "bold"}),
@@ -49,6 +49,12 @@ app.layout = html.Div(children=[
 # ======================================
 # App Callbacks
 # ======================================
+
+# Global stuff hopefully
+frames = []
+p = pyaudio.PyAudio()
+stream = p.open(format=pyaudio.paInt16, channels=2, rate=44100, input=True, frames_per_buffer=1024)
+curr_time = dt.now().strftime("%d-%m-%Y_%H-%M")
 
 @app.callback(
     [Output("record-button", "children"), Output("record-button", "style"), Output("app-status", "children")],
@@ -67,28 +73,31 @@ def start_or_stop_recording(n_clicks):
     Output("record-status", "children"),
     [Input("record-button", "n_clicks")]
 )
-def record_audio(n_clicks):
-    p = pyaudio.PyAudio()
-    stream = p.open(format=pyaudio.paInt16, channels=2, rate=44100, input=True, frames_per_buffer=1024)
-    frames = []
-    
+def record_audio(n_clicks): 
     if (n_clicks % 2) != 0:
+        p = pyaudio.PyAudio()
+        stream = p.open(format=pyaudio.paInt16, channels=2, rate=44100, input=True, frames_per_buffer=1024)
         for i in range(int(44100 / 1024 * 5)):
             data = stream.read(1024)
             frames.append(data)
             if (n_clicks % 2) == 0:
-                break
+                break 
 
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
-    with wave.open(f"test_recording_{curr_time}.wav", "wb") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-        wf.setframerate(44100)
-        wf.writeframes(b"".join(frames))
-    return ["Please wait for 5 seconds before you stop recording!"]
-
+@app.callback(
+    Output("hidden-div", "children"),
+    [Input("record-button", "n_clicks")]
+)
+def stop_recording(n_clicks):
+    if (n_clicks % 2) == 0:
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+        with wave.open(f"test_recording_{curr_time}.wav", "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
+            wf.setframerate(44100)
+            wf.writeframes(b"".join(frames))
+        return ["None"]
 
 @app.callback(
     Output("prediction-container", "children"),
