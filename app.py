@@ -84,11 +84,11 @@ def record_audio(n_clicks):
                 break 
 
 @app.callback(
-    Output("hidden-div", "children"),
+    [Output("hidden-div", "children"), Output("prediction-container", "children")],
     [Input("record-button", "n_clicks")]
 )
 def stop_recording(n_clicks):
-    if (n_clicks % 2) == 0:
+    if (n_clicks % 2) == 0 and (n_clicks > 0):
         stream.stop_stream()
         stream.close()
         p.terminate()
@@ -97,21 +97,19 @@ def stop_recording(n_clicks):
             wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
             wf.setframerate(44100)
             wf.writeframes(b"".join(frames))
-        return ["None"]
 
-@app.callback(
-    Output("prediction-container", "children"),
-    [Input("record-button", "n_clicks")]
-)
-def generate_prediction(n_clicks):
-    if os.path.exists(f"test_recording_{curr_time}.wav") and (n_clicks % 2) == 0:
-        start_time = time.time()
-        pred_str = model.predict_for_file(f"test_recording_{curr_time}.wav")
-        print("Prediction time: {} sec".format(time.time() - start_time))
-        os.remove(f"test_recording_{curr_time}.wav")
-        return [pred_str[0][0] + pred_str[0][1:].lower()]
-    return ["Please generate a recording!"]
+        if os.path.exists(f"test_recording_{curr_time}.wav"):
+            start_time = time.time()
+            pred_str = model.predict_for_file(f"test_recording_{curr_time}.wav")
+            print("Prediction time: {} sec".format(time.time() - start_time))
+            os.remove(f"test_recording_{curr_time}.wav")
+            return ["None"], [pred_str[0][0] + pred_str[0][1:].lower()]
+        else:
+            return ["None"], ["Please generate a recording!"]
+    else:
+        return ["None"], ["Please generate a recording!"]
 
+    
 # ======================================
 # Main
 # ======================================
