@@ -147,8 +147,20 @@ class Trainer:
             logits = self.model.model(inputs, attention_mask=input_mask).logits
             predictions = F.softmax(logits, dim=-1).argmax(dim=-1).detach().cpu().numpy()
         pred_str = self.train_loader.processor.batch_decode(predictions)
-        print("\nPrediction: {}".format(pred_str))
-        return pred_str
+        print("\nPrediction: {}".format(pred_str[0]))
+        return pred_str[0]
+        
+    def predict_on_array(self, signal):
+        if len(signal.shape) > 1:
+            signal = np.mean(signal, axis=-1)
+        inputs = self.train_loader.processor(signal, sampling_rate=16000, return_attention_mask=True, return_tensors="pt")
+        input_data, input_attention = inputs["input_values"].to(self.device), inputs["attention_mask"].to(self.device)
+        with torch.no_grad():
+            logits = self.model.model(inputs, attention_mask=input_mask).logits
+            predictions = F.softmax(logits, dim=-1).argmax(dim=-1).detach().cpu().numpy()
+        pred_str = self.train_loader.processor.batch_decode(predictions)
+        print("\nPrediction: {}".format(pred_str[0]))
+        return pred_str[0]
 
     def train(self):
         print() 
