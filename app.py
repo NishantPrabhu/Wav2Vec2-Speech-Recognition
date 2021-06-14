@@ -1,138 +1,91 @@
 
 import os
-import time
-import dash
-import wave
-import models
-import pyaudio
-import librosa
-import soundfile
+import av 
+import time 
+import pydub
+import queue
+import models 
+import threading
 import numpy as np
-import dash_core_components as dcc 
-import dash_html_components as html 
-import dash_bootstrap_components as dbc
-from dash.dependencies import Output, Input 
+import streamlit as st
+from collections import deque
 from datetime import datetime as dt
+from streamlit_webrtc import AudioProcessorBase, ClientSettings, WebRtcMode, webrtc_streamer
 
-external_stylesheets = [dbc.themes.BOOTSTRAP]
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
 
-# ======================================
-# App layout
-# ======================================
+def main(model):
+    # Application
+    st.header("Automatic Speech Recognition")
+    st.markdown("Wav2Vec 2.0 model finetuned on TIMIT English dataset")
 
-app.layout = html.Div(children=[
-
-    html.H1(
-        "Automatic Speech Recognition",
-        style = {"width": "100%", "padding-top": "200px", "text-align": "center", "font-weight": "bold", "padding-left": "100px", "padding-right": "100px"}
-    ), 
-
-    html.Div(
-        style = {"width": "100%", "float": "left", "padding-left": "200px", "text-align": "center", "padding-right": "200px", "padding-top": "50px"},
-        children = [
-            html.Div(style={"width": "50%", "display": "inline-block", "padding-left": "300px"}, children=[
-                html.Button(
-                    children=["Start recording"], 
-                    style={"background-color": "#2295d4", "color": "white", "height": "50px", "width": "250px", "border": {"width": "0px"}},
-                    id="start-button", 
-                    n_clicks=0
-                ),
-            ]),
-            html.Div(style={"width": "50%", "display": "inline-block", "padding-right": "300px"}, children=[
-                html.Button(
-                    children=["Stop recording"], 
-                    style={"background-color": "#bd263a", "color": "white", "height": "50px", "width": "250px", "border": {"width": "0px"}},
-                    id="stop-button", 
-                    n_clicks=0
-                ),
-            ]),
-            html.Div(id="hidden-div", style={"display": "none"}),
-            html.Div(id="hidden-div-2", style={"display": "none"}),
-            html.Div(id="app-status", style={"padding-top": "40px", "width": "100%", "text-align": "center"}),
-
-            html.H4("Prediction", style={"padding-top": "40px", "width": "100%", "text-align": "center", "font-weight": "bold"}),
-            html.Div(id="prediction-container", style={"padding-top": "20px", "width": "100%", "text-align": "center"})
-        ]
+    webrtc_ctx = webrtc_streamer(
+        key="speech-to-text-hyperverge",
+        mode=WebRtcMode.SENDONLY,
+        audio_receiver_size=1024,
+        client_settings=ClientSettings(
+            rtc_configuration={
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            },
+            media_stream_constraints={"video": False, "audio": True}
+        )
     )
-])
 
-# ======================================
-# App Callbacks
-# ======================================
+    status_indicator = st.empty()
+    if not webrtc_ctx.state.playing:
+        return 
 
-curr_time = dt.now().strftime("%d-%m-%Y_%H-%M")
-stopped = False
+    status_indicator.write("Loading...")
+    text_output = st.empty()
+    sound_chunk = pydub.AudioSegment.empty()
 
-@app.callback(
-    Output("hidden-div", "children"),
-    [Input("start-button", "n_clicks")]
-)
-def record_audio(start_clicks):
-    stopped = False
-    if start_clicks > 0:
-        frames = []
-        p = pyaudio.PyAudio()
-        stream = p.open(format=pyaudio.paInt16, channels=2, rate=44100, input=True, frames_per_buffer=1024) 
-        for i in range(int(44100 / 1024 * 10)):
-            data = stream.read(1024)
-            frames.append(data)
-            if stopped:
-                break
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        with wave.open(f"test_recording_{curr_time}.wav", "wb") as wf:
-            wf.setnchannels(2)
-            wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-            wf.setframerate(44100)
-            wf.writeframes(b"".join(frames))
-    return ["None"]
-        
+    while True:
+        if webrtc_ctx.audio_receiver:
+            try:
+                audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
+            except queue.Empty:
+                time.sleep(0.1)
+                status_indicator.write("No audio arrived")
+                continue
 
-@app.callback(
-    [Output("hidden-div-2", "children"), Output("app-status", "children")],
-    [Input("start-button", "n_clicks"), Input("stop-button", "n_clicks")]
-)
-def stop_recording(start_clicks, stop_clicks):
-    if (stop_clicks > 0):
-        if stop_clicks == start_clicks:
-            stopped = True           
-            return ["None"], ["Please wait while your recorded audio is being processed."]
+            status_indicator.write("Recording! Say something!")
+            for audio_frame in audio_frames:
+                sound = pydub.AudioSegment(
+                    data=audio_frame.to_ndarray().tobytes(),
+                    sample_width=audio_frame.format.bytes,
+                    frame_rate=audio_frame.sample_rate,
+                    channels=len(audio_frame.layout.channels)
+                )
+                sound_chunk += sound
+
+            # print(len(sound_chunk))
+            if len(sound_chunk) >= 1000:
+                sound_chunk = sound_chunk.set_channels(1).set_frame_rate(16000)
+                buffer = np.array(sound_chunk.get_array_of_samples())
+                pred_text = model.predict_on_array(buffer)
+                text_output.markdown(f"**Text: ** {pred_text}")
         else:
-            return ["None"], ["Start recording by clicking the 'Start recording' button"]
-    else:
-        return ["None"], ["Start recording by clicking the 'Start recording' button"]
+            status_indicator.write("AudioReceiver not set. Abort.")
+            break
 
-@app.callback(
-    Output("prediction-container", "children"),
-    [Input("hidden-div", "children")]
-)
-def generate_predictions(dummy):
-    while not os.path.exists(f"test_recording_{curr_time}.wav"):
-        continue
-    start_time = time.time()
-    pred_str = model.predict_for_file(f"test_recording_{curr_time}.wav")
-    print("Prediction time: {} sec".format(time.time() - start_time))
-    os.remove(f"test_recording_{curr_time}.wav")
-    return [pred_str[0][0] + pred_str[0][1:].lower()]
-    
-# ======================================
-# Main
-# ======================================
 
 if __name__ == "__main__":
 
-    # Initialize the model
-    args = {
-        "config": "configs/main.yaml", 
-        "output": dt.now().strftime("%d-%m-%Y_%H-%M"), 
-        "task": "single_test", 
-        "device": "cpu",
-        "dataset": "timit", 
-        "load": "outputs/timit/train/31-05-2021-11-58",
-        "file": "test_recording.wav"
-    }
-    model = models.Trainer(args)
+    DEBUG = os.environ.get("DEBUG", "false").lower() not in ["false", "no", "0"]
+    
+    # Load model
+    @st.cache
+    def load_model():
+        args = {
+            "config": "configs/main.yaml", 
+            "output": dt.now().strftime("%d-%m-%Y_%H-%M"), 
+            "task": "single_test", 
+            "device": "cpu",
+            "dataset": "timit", 
+            "load": "outputs/timit/train/31-05-2021-11-58",
+            "file": "test_recording.wav"
+        }
+        model = models.Trainer(args)
+        return model
 
-    app.run_server(debug=True)
+    model = load_model()
+    main(model)
